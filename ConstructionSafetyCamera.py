@@ -3,7 +3,8 @@ import cv2
 import math
 from helper import create_video_writer
 
-cap = cv2.VideoCapture('videos/safety.mp4')
+# Use the correct device index for screen capture (usually 1 or 2)
+cap = cv2.VideoCapture(1, cv2.CAP_AVFOUNDATION)  # Use cv2.CAP_AVFOUNDATION for macOS
 writer = create_video_writer(cap, "ConstructionSiteSafetyOutput.mp4")
 
 model = YOLO("best.pt")
@@ -12,8 +13,13 @@ classNames = ['Excavator', 'Gloves', 'Hardhat', 'Ladder', 'Mask', 'NO-Hardhat', 
               'Person', 'SUV', 'Safety Cone', 'Safety Vest', 'bus', 'dump truck', 'fire hydrant', 'machinery',
               'mini-van', 'sedan', 'semi', 'trailer', 'truck and trailer', 'truck', 'van', 'vehicle', 'wheel loader']
 myColor = (0, 0, 255)
+
 while True:
     success, img = cap.read()
+    if not success:
+        print("Failed to capture screen")
+        break
+
     results = model(img, stream=True)
     for r in results:
         boxes = r.boxes
@@ -37,7 +43,6 @@ while True:
                 else:
                     myColor = (255, 0, 0)
 
-
                 image = cv2.putText(img, f'{classNames[cls]}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX,
                                     1, (255, 0, 0), 2, cv2.LINE_AA)
                 cv2.rectangle(img, (x1, y1), (x2, y2), myColor, 3)
@@ -46,7 +51,7 @@ while True:
     writer.write(img)
     if cv2.waitKey(1) == ord("q"):
         break
+
 cap.release()
 writer.release()
 cv2.destroyAllWindows()
-#cv2.waitKey(1)

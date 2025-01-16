@@ -1,10 +1,18 @@
 from ultralytics import YOLO
 import cv2
+import numpy as np
+from mss import mss
 import math
 from helper import create_video_writer
 
-cap = cv2.VideoCapture('videos/safety.mp4')
-writer = create_video_writer(cap, "ConstructionSiteSafetyOutput.mp4")
+# Set up screen capture
+monitor = {"top": 0, "left": 0, "width": 1920, "height": 1080}  # Adjust for your screen resolution
+sct = mss()
+
+# Set up video writer
+frame_width = monitor["width"]
+frame_height = monitor["height"]
+writer = cv2.VideoWriter("ConstructionSiteSafetyOutput.mp4", cv2.VideoWriter_fourcc(*"mp4v"), 30, (frame_width, frame_height))
 
 model = YOLO("best.pt")
 
@@ -12,9 +20,14 @@ classNames = ['Excavator', 'Gloves', 'Hardhat', 'Ladder', 'Mask', 'NO-Hardhat', 
               'Person', 'SUV', 'Safety Cone', 'Safety Vest', 'bus', 'dump truck', 'fire hydrant', 'machinery',
               'mini-van', 'sedan', 'semi', 'trailer', 'truck and trailer', 'truck', 'van', 'vehicle', 'wheel loader']
 myColor = (0, 0, 255)
+
 while True:
-    success, img = cap.read()
-    results = model(img, stream=True)
+    # Capture screen
+    frame = np.array(sct.grab(monitor))
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)  # Convert from BGRA to BGR
+
+    # Process frame with YOLO
+    results = model(frame, stream=True)
     for r in results:
         boxes = r.boxes
         for box in boxes:
@@ -37,16 +50,18 @@ while True:
                 else:
                     myColor = (255, 0, 0)
 
-
-                image = cv2.putText(img, f'{classNames[cls]}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX,
+                image = cv2.putText(frame, f'{classNames[cls]}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX,
                                     1, (255, 0, 0), 2, cv2.LINE_AA)
-                cv2.rectangle(img, (x1, y1), (x2, y2), myColor, 3)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), myColor, 3)
 
-    cv2.imshow("Image", img)
-    writer.write(img)
+    # Display the frame
+    cv2.imshow("Screen Capture", frame)
+    writer.write(frame)
+
+    # Break the loop if 'q' is pressed
     if cv2.waitKey(1) == ord("q"):
         break
-cap.release()
+
+# Release resources
 writer.release()
 cv2.destroyAllWindows()
-#cv2.waitKey(1)
