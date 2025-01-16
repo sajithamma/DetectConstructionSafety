@@ -7,7 +7,8 @@ import numpy as np
 from PIL import Image
 import os
 import subprocess
-import face_recognition  # For face recognition
+import face_recognition
+import json
 
 # Load the YOLO model
 model = YOLO("best.pt")
@@ -30,10 +31,20 @@ st.sidebar.title("Face Recognition")
 uploaded_faces = st.sidebar.file_uploader("Upload face photos (one at a time)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
 face_names = st.sidebar.text_input("Enter the name of the person (comma-separated for multiple faces):")
 
-# Store face encodings and names
-known_face_encodings = []
-known_face_names = []
+# File to store face encodings and names
+face_data_file = "face_data.json"
 
+# Load existing face data if available
+if os.path.exists(face_data_file):
+    with open(face_data_file, "r") as f:
+        face_data = json.load(f)
+    known_face_encodings = [np.array(encoding) for encoding in face_data["encodings"]]
+    known_face_names = face_data["names"]
+else:
+    known_face_encodings = []
+    known_face_names = []
+
+# Add new faces to the known faces list
 if uploaded_faces and face_names:
     face_names_list = [name.strip() for name in face_names.split(",")]
     if len(uploaded_faces) != len(face_names_list):
@@ -47,6 +58,11 @@ if uploaded_faces and face_names:
                 known_face_names.append(face_names_list[i])
             else:
                 st.sidebar.warning(f"No face detected in {uploaded_face.name}. Skipping.")
+
+        # Save the updated face data
+        face_data = {"encodings": [encoding.tolist() for encoding in known_face_encodings], "names": known_face_names}
+        with open(face_data_file, "w") as f:
+            json.dump(face_data, f)
 
 # Function to process frames with face recognition
 def process_frame_with_faces(frame):
@@ -113,12 +129,15 @@ def process_frame_with_faces(frame):
 def list_camera_devices():
     devices = []
     for index in range(10):  # Check up to 10 devices
-        cap = cv2.VideoCapture(index)
-        if cap.isOpened():
-            devices.append(f"Camera {index}")
-            cap.release()
-        else:
-            cap.release()
+        try:
+            cap = cv2.VideoCapture(index)
+            if cap.isOpened():
+                devices.append(f"Camera {index}")
+                cap.release()
+            else:
+                cap.release()
+        except Exception as e:
+            st.warning(f"Error accessing camera {index}: {e}")
     return devices
 
 # Function to list preset videos in the 'videos' folder
@@ -161,56 +180,61 @@ if input_option == "Upload Video":
         output_temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
 
         # Open the video file
-        cap = cv2.VideoCapture(tfile.name)
+        try:
+            cap = cv2.VideoCapture(tfile.name)
+            if not cap.isOpened():
+                st.error("Failed to open the uploaded video file.")
+            else:
+                # Get video properties
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
 
-        # Get video properties
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
+                # Desired FPS for processing and output
+                desired_fps = 10  # Adjust this value as needed
+                frame_skip_interval = int(fps / desired_fps)
 
-        # Desired FPS for processing and output
-        desired_fps = 10  # Adjust this value as needed
-        frame_skip_interval = int(fps / desired_fps)
+                # Create VideoWriter for output with desired FPS
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                out = cv2.VideoWriter(output_temp_file.name, fourcc, desired_fps, (width, height))
 
-        # Create VideoWriter for output with desired FPS
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_temp_file.name, fourcc, desired_fps, (width, height))
+                # Read frames and process
+                st.write('Processing video...')
 
-        # Read frames and process
-        st.write('Processing video...')
+                frame_placeholder = st.empty()
+                frame_count = 0
 
-        frame_placeholder = st.empty()
-        frame_count = 0
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
 
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
+                    # Skip frames to reduce FPS
+                    frame_count += 1
+                    if frame_count % frame_skip_interval != 0:
+                        continue
 
-            # Skip frames to reduce FPS
-            frame_count += 1
-            if frame_count % frame_skip_interval != 0:
-                continue
+                    # Process the frame with face recognition
+                    processed_frame = process_frame_with_faces(frame)
 
-            # Process the frame with face recognition
-            processed_frame = process_frame_with_faces(frame)
+                    # Write the processed frame
+                    out.write(processed_frame)
 
-            # Write the processed frame
-            out.write(processed_frame)
+                    # Display the processed frame in Streamlit
+                    frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                    frame_pil = Image.fromarray(frame_rgb)
+                    frame_placeholder.image(frame_pil, use_container_width=True)
 
-            # Display the processed frame in Streamlit
-            frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-            frame_pil = Image.fromarray(frame_rgb)
-            frame_placeholder.image(frame_pil, use_container_width=True)
+                # Release resources
+                cap.release()
+                out.release()
 
-        # Release resources
-        cap.release()
-        out.release()
-
-        # Display the processed video
-        st.write('Processed Video:')
-        video_bytes = open(output_temp_file.name, 'rb').read()
-        st.video(video_bytes)
+                # Display the processed video
+                st.write('Processed Video:')
+                video_bytes = open(output_temp_file.name, 'rb').read()
+                st.video(video_bytes)
+        except Exception as e:
+            st.error(f"Error processing video: {e}")
 
 # Option 2: Camera Capture
 elif input_option == "Camera Capture":
@@ -226,41 +250,43 @@ elif input_option == "Camera Capture":
         camera_index = int(selected_camera.split(" ")[1])  # Extract camera index from the selected option
 
         # Initialize camera
-        cap = cv2.VideoCapture(camera_index)
+        try:
+            cap = cv2.VideoCapture(camera_index)
+            if not cap.isOpened():
+                st.error(f"Unable to access {selected_camera}.")
+            else:
+                st.write(f"Real-time processing using {selected_camera}...")
+                frame_placeholder = st.empty()
 
-        if not cap.isOpened():
-            st.error(f"Unable to access {selected_camera}.")
-        else:
-            st.write(f"Real-time processing using {selected_camera}...")
-            frame_placeholder = st.empty()
+                # Add a button to stop the camera feed
+                stop_camera = st.sidebar.button("Stop Camera")
 
-            # Add a button to stop the camera feed
-            stop_camera = st.sidebar.button("Stop Camera")
+                while True:
+                    if stop_camera:
+                        st.write("Camera feed stopped.")
+                        break
 
-            while True:
-                if stop_camera:
-                    st.write("Camera feed stopped.")
-                    break
+                    ret, frame = cap.read()
+                    if not ret:
+                        st.error("Failed to capture frame.")
+                        break
 
-                ret, frame = cap.read()
-                if not ret:
-                    st.error("Failed to capture frame.")
-                    break
+                    # Process the frame with face recognition
+                    processed_frame = process_frame_with_faces(frame)
 
-                # Process the frame with face recognition
-                processed_frame = process_frame_with_faces(frame)
+                    # Display the processed frame in Streamlit
+                    frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                    frame_pil = Image.fromarray(frame_rgb)
+                    frame_placeholder.image(frame_pil, use_container_width=True)
 
-                # Display the processed frame in Streamlit
-                frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-                frame_pil = Image.fromarray(frame_rgb)
-                frame_placeholder.image(frame_pil, use_container_width=True)
+                    # Break the loop if 'q' is pressed (for local testing)
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
 
-                # Break the loop if 'q' is pressed (for local testing)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-
-            # Release resources
-            cap.release()
+                # Release resources
+                cap.release()
+        except Exception as e:
+            st.error(f"Error accessing camera: {e}")
 
 # Option 3: Preset Videos
 elif input_option == "Preset Videos":
@@ -276,62 +302,64 @@ elif input_option == "Preset Videos":
         video_path = os.path.join("videos", selected_video)
 
         # Open the video file
-        cap = cv2.VideoCapture(video_path)
+        try:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                st.error(f"Unable to open {selected_video}.")
+            else:
+                # Get video properties
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
 
-        if not cap.isOpened():
-            st.error(f"Unable to open {selected_video}.")
-        else:
-            # Get video properties
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
+                # Desired FPS for processing and output
+                desired_fps = 10  # Adjust this value as needed
+                frame_skip_interval = int(fps / desired_fps)
 
-            # Desired FPS for processing and output
-            desired_fps = 10  # Adjust this value as needed
-            frame_skip_interval = int(fps / desired_fps)
+                # Create a temporary output file
+                output_temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
 
-            # Create a temporary output file
-            output_temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+                # Create VideoWriter for output with desired FPS
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                out = cv2.VideoWriter(output_temp_file.name, fourcc, desired_fps, (width, height))
 
-            # Create VideoWriter for output with desired FPS
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter(output_temp_file.name, fourcc, desired_fps, (width, height))
+                # Read frames and process
+                st.write(f'Processing {selected_video}...')
 
-            # Read frames and process
-            st.write(f'Processing {selected_video}...')
+                frame_placeholder = st.empty()
+                frame_count = 0
 
-            frame_placeholder = st.empty()
-            frame_count = 0
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
 
-            while cap.isOpened():
-                ret, frame = cap.read()
-                if not ret:
-                    break
+                    # Skip frames to reduce FPS
+                    frame_count += 1
+                    if frame_count % frame_skip_interval != 0:
+                        continue
 
-                # Skip frames to reduce FPS
-                frame_count += 1
-                if frame_count % frame_skip_interval != 0:
-                    continue
+                    # Process the frame with face recognition
+                    processed_frame = process_frame_with_faces(frame)
 
-                # Process the frame with face recognition
-                processed_frame = process_frame_with_faces(frame)
+                    # Write the processed frame
+                    out.write(processed_frame)
 
-                # Write the processed frame
-                out.write(processed_frame)
+                    # Display the processed frame in Streamlit
+                    frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                    frame_pil = Image.fromarray(frame_rgb)
+                    frame_placeholder.image(frame_pil, use_container_width=True)
 
-                # Display the processed frame in Streamlit
-                frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-                frame_pil = Image.fromarray(frame_rgb)
-                frame_placeholder.image(frame_pil, use_container_width=True)
+                # Release resources
+                cap.release()
+                out.release()
 
-            # Release resources
-            cap.release()
-            out.release()
-
-            # Display the processed video
-            st.write('Processed Video:')
-            video_bytes = open(output_temp_file.name, 'rb').read()
-            st.video(video_bytes)
+                # Display the processed video
+                st.write('Processed Video:')
+                video_bytes = open(output_temp_file.name, 'rb').read()
+                st.video(video_bytes)
+        except Exception as e:
+            st.error(f"Error processing video: {e}")
 
 # Option 4: YouTube URL
 elif input_option == "YouTube URL":
@@ -357,44 +385,47 @@ elif input_option == "YouTube URL":
 
                 # FFmpeg command to read the video stream
                 ffmpeg_cmd = ['ffmpeg', '-i', video_url, '-f', 'image2pipe', '-vcodec', 'rawvideo', '-pix_fmt', 'bgr24', '-']
-                pipe = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE)
+                try:
+                    pipe = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE)
 
-                # Read frames and process
-                st.write('Processing YouTube video...')
+                    # Read frames and process
+                    st.write('Processing YouTube video...')
 
-                frame_placeholder = st.empty()
-                bytes_per_frame = width * height * 3
+                    frame_placeholder = st.empty()
+                    bytes_per_frame = width * height * 3
 
-                while True:
-                    frame = pipe.stdout.read(bytes_per_frame)
-                    if len(frame) != bytes_per_frame:
-                        break  # End of video
+                    while True:
+                        frame = pipe.stdout.read(bytes_per_frame)
+                        if len(frame) != bytes_per_frame:
+                            break  # End of video
 
-                    # Convert frame to numpy array
-                    image = np.frombuffer(frame, dtype=np.uint8).reshape((height, width, 3))
+                        # Convert frame to numpy array
+                        image = np.frombuffer(frame, dtype=np.uint8).reshape((height, width, 3))
 
-                    # Ensure the frame is writeable
-                    image = image.copy()
+                        # Ensure the frame is writeable
+                        image = image.copy()
 
-                    # Process the frame with face recognition
-                    processed_frame = process_frame_with_faces(image)
+                        # Process the frame with face recognition
+                        processed_frame = process_frame_with_faces(image)
 
-                    # Write the processed frame
-                    out.write(processed_frame)
+                        # Write the processed frame
+                        out.write(processed_frame)
 
-                    # Display the processed frame in Streamlit
-                    frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-                    frame_pil = Image.fromarray(frame_rgb)
-                    frame_placeholder.image(frame_pil, use_container_width=True)
+                        # Display the processed frame in Streamlit
+                        frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                        frame_pil = Image.fromarray(frame_rgb)
+                        frame_placeholder.image(frame_pil, use_container_width=True)
 
-                # Release resources
-                pipe.terminate()
-                out.release()
+                    # Release resources
+                    pipe.terminate()
+                    out.release()
 
-                # Display the processed video
-                st.write('Processed Video:')
-                video_bytes = open(output_temp_file.name, 'rb').read()
-                st.video(video_bytes)
+                    # Display the processed video
+                    st.write('Processed Video:')
+                    video_bytes = open(output_temp_file.name, 'rb').read()
+                    st.video(video_bytes)
+                except Exception as e:
+                    st.error(f"Error processing YouTube video: {e}")
             else:
                 st.error("Failed to get video resolution.")
         else:
