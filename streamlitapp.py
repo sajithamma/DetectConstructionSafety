@@ -44,8 +44,11 @@ else:
     known_face_encodings = []
     known_face_names = []
 
+# Add a button to add faces
+add_face_button = st.sidebar.button("Add Face")
+
 # Add new faces to the known faces list
-if uploaded_faces and face_names:
+if add_face_button and uploaded_faces and face_names:
     face_names_list = [name.strip() for name in face_names.split(",")]
     if len(uploaded_faces) != len(face_names_list):
         st.sidebar.error("Number of uploaded faces must match the number of names provided.")
@@ -56,6 +59,7 @@ if uploaded_faces and face_names:
             if len(face_encoding) > 0:
                 known_face_encodings.append(face_encoding[0])
                 known_face_names.append(face_names_list[i])
+                st.sidebar.success(f"Face for {face_names_list[i]} added successfully!")
             else:
                 st.sidebar.warning(f"No face detected in {uploaded_face.name}. Skipping.")
 
