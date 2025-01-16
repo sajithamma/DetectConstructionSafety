@@ -68,6 +68,10 @@ if add_face_button and uploaded_faces and face_names:
         with open(face_data_file, "w") as f:
             json.dump(face_data, f)
 
+        # Clear the uploaded faces and names after adding
+        uploaded_faces = []
+        face_names = ""
+
 # Function to process frames with face recognition
 def process_frame_with_faces(frame):
     # Ensure the frame is writeable
