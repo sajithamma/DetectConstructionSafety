@@ -26,6 +26,9 @@ input_option = st.sidebar.radio("Choose input source:", ("Upload Video", "Camera
 
 # Function to process frames
 def process_frame(frame):
+    # Ensure the frame is writeable
+    frame = frame.copy()
+    
     results = model(frame, stream=True)
     for r in results:
         boxes = r.boxes
@@ -319,6 +322,9 @@ elif input_option == "YouTube URL":
 
                     # Convert frame to numpy array
                     image = np.frombuffer(frame, dtype=np.uint8).reshape((height, width, 3))
+
+                    # Ensure the frame is writeable
+                    image = image.copy()
 
                     # Process the frame
                     processed_frame = process_frame(image)
