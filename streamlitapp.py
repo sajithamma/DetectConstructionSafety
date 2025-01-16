@@ -6,6 +6,7 @@ import streamlit as st
 import numpy as np
 from PIL import Image
 import os
+import subprocess
 
 # Load the YOLO model
 model = YOLO("best.pt")
@@ -21,7 +22,7 @@ st.title('Construction Site Safety Video Processing')
 
 # Sidebar for input options
 st.sidebar.title("Input Options")
-input_option = st.sidebar.radio("Choose input source:", ("Upload Video", "Camera Capture", "Preset Videos"))
+input_option = st.sidebar.radio("Choose input source:", ("Upload Video", "Camera Capture", "Preset Videos", "YouTube URL"))
 
 # Function to process frames
 def process_frame(frame):
@@ -76,6 +77,24 @@ def list_preset_videos():
         return []
     videos = [f for f in os.listdir(video_folder) if f.endswith('.mp4')]
     return videos
+
+# Function to get YouTube video URL
+def get_youtube_video_url(youtube_url):
+    cmd = ['yt-dlp', '--get-url', '--format', 'best', youtube_url]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode == 0:
+        return result.stdout.strip()
+    else:
+        return None
+
+# Function to get video resolution
+def get_video_resolution(video_url):
+    cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', video_url]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode == 0:
+        return tuple(map(int, result.stdout.strip().split('x')))
+    else:
+        return None
 
 # Option 1: Upload Video
 if input_option == "Upload Video":
@@ -260,3 +279,67 @@ elif input_option == "Preset Videos":
             st.write('Processed Video:')
             video_bytes = open(output_temp_file.name, 'rb').read()
             st.video(video_bytes)
+
+# Option 4: YouTube URL
+elif input_option == "YouTube URL":
+    st.sidebar.write("Enter a YouTube URL for processing...")
+
+    # Input for YouTube URL
+    youtube_url = st.sidebar.text_input("Enter YouTube URL:")
+    if youtube_url:
+        # Get the video URL using yt-dlp
+        video_url = get_youtube_video_url(youtube_url)
+        if video_url:
+            # Get video resolution
+            resolution = get_video_resolution(video_url)
+            if resolution:
+                width, height = resolution
+
+                # Create a temporary output file
+                output_temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+
+                # Create VideoWriter for output with desired FPS
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                out = cv2.VideoWriter(output_temp_file.name, fourcc, 10, (width, height))  # Default FPS: 10
+
+                # FFmpeg command to read the video stream
+                ffmpeg_cmd = ['ffmpeg', '-i', video_url, '-f', 'image2pipe', '-vcodec', 'rawvideo', '-pix_fmt', 'bgr24', '-']
+                pipe = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE)
+
+                # Read frames and process
+                st.write('Processing YouTube video...')
+
+                frame_placeholder = st.empty()
+                bytes_per_frame = width * height * 3
+
+                while True:
+                    frame = pipe.stdout.read(bytes_per_frame)
+                    if len(frame) != bytes_per_frame:
+                        break  # End of video
+
+                    # Convert frame to numpy array
+                    image = np.frombuffer(frame, dtype=np.uint8).reshape((height, width, 3))
+
+                    # Process the frame
+                    processed_frame = process_frame(image)
+
+                    # Write the processed frame
+                    out.write(processed_frame)
+
+                    # Display the processed frame in Streamlit
+                    frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                    frame_pil = Image.fromarray(frame_rgb)
+                    frame_placeholder.image(frame_pil, use_container_width=True)
+
+                # Release resources
+                pipe.terminate()
+                out.release()
+
+                # Display the processed video
+                st.write('Processed Video:')
+                video_bytes = open(output_temp_file.name, 'rb').read()
+                st.video(video_bytes)
+            else:
+                st.error("Failed to get video resolution.")
+        else:
+            st.error("Failed to get video URL.")
