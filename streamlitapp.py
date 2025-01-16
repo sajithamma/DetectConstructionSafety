@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 import os
 import subprocess
+import face_recognition  # For face recognition
 
 # Load the YOLO model
 model = YOLO("best.pt")
@@ -22,12 +23,37 @@ st.title('Zaper Safety - Live Video Safety Monitoring')
 
 # Sidebar for input options
 st.sidebar.title("Input Options")
-input_option = st.sidebar.radio("Choose input source:", ("Preset Videos", "Upload Video", "Camera Capture", "YouTube URL")) 
-# Function to process frames
-def process_frame(frame):
+input_option = st.sidebar.radio("Choose input source:", ("Preset Videos", "Upload Video", "Camera Capture", "YouTube URL"))
+
+# Face recognition setup
+st.sidebar.title("Face Recognition")
+uploaded_faces = st.sidebar.file_uploader("Upload face photos (one at a time)", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
+face_names = st.sidebar.text_input("Enter the name of the person (comma-separated for multiple faces):")
+
+# Store face encodings and names
+known_face_encodings = []
+known_face_names = []
+
+if uploaded_faces and face_names:
+    face_names_list = [name.strip() for name in face_names.split(",")]
+    if len(uploaded_faces) != len(face_names_list):
+        st.sidebar.error("Number of uploaded faces must match the number of names provided.")
+    else:
+        for i, uploaded_face in enumerate(uploaded_faces):
+            face_image = face_recognition.load_image_file(uploaded_face)
+            face_encoding = face_recognition.face_encodings(face_image)
+            if len(face_encoding) > 0:
+                known_face_encodings.append(face_encoding[0])
+                known_face_names.append(face_names_list[i])
+            else:
+                st.sidebar.warning(f"No face detected in {uploaded_face.name}. Skipping.")
+
+# Function to process frames with face recognition
+def process_frame_with_faces(frame):
     # Ensure the frame is writeable
     frame = frame.copy()
-    
+
+    # Perform YOLO object detection
     results = model(frame, stream=True)
     for r in results:
         boxes = r.boxes
@@ -56,6 +82,31 @@ def process_frame(frame):
                     cv2.putText(frame, f'{classNames[cls]}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX,
                                 1, (255, 0, 0), 2, cv2.LINE_AA)
                     cv2.rectangle(frame, (x1, y1), (x2, y2), myColor, 3)
+
+    # Perform face recognition
+    if len(known_face_encodings) > 0:
+        # Find all face locations and encodings in the frame
+        face_locations = face_recognition.face_locations(frame)
+        face_encodings = face_recognition.face_encodings(frame, face_locations)
+
+        # Loop through each face found in the frame
+        for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+            # Compare the face with known faces
+            matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
+            name = "Unknown"
+
+            # Use the known face with the smallest distance to the new face
+            face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
+            best_match_index = np.argmin(face_distances)
+            if matches[best_match_index]:
+                name = known_face_names[best_match_index]
+
+            # Draw a box around the face
+            cv2.rectangle(frame, (left, top), (right, bottom), (255, 0, 255), 2)
+
+            # Draw a label with the name below the face
+            cv2.putText(frame, name, (left, bottom + 20), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 1)
+
     return frame
 
 # Function to list available camera devices
@@ -141,8 +192,8 @@ if input_option == "Upload Video":
             if frame_count % frame_skip_interval != 0:
                 continue
 
-            # Process the frame
-            processed_frame = process_frame(frame)
+            # Process the frame with face recognition
+            processed_frame = process_frame_with_faces(frame)
 
             # Write the processed frame
             out.write(processed_frame)
@@ -196,8 +247,8 @@ elif input_option == "Camera Capture":
                     st.error("Failed to capture frame.")
                     break
 
-                # Process the frame
-                processed_frame = process_frame(frame)
+                # Process the frame with face recognition
+                processed_frame = process_frame_with_faces(frame)
 
                 # Display the processed frame in Streamlit
                 frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
@@ -262,8 +313,8 @@ elif input_option == "Preset Videos":
                 if frame_count % frame_skip_interval != 0:
                     continue
 
-                # Process the frame
-                processed_frame = process_frame(frame)
+                # Process the frame with face recognition
+                processed_frame = process_frame_with_faces(frame)
 
                 # Write the processed frame
                 out.write(processed_frame)
@@ -325,8 +376,8 @@ elif input_option == "YouTube URL":
                     # Ensure the frame is writeable
                     image = image.copy()
 
-                    # Process the frame
-                    processed_frame = process_frame(image)
+                    # Process the frame with face recognition
+                    processed_frame = process_frame_with_faces(image)
 
                     # Write the processed frame
                     out.write(processed_frame)
