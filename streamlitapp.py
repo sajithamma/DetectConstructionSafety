@@ -18,12 +18,11 @@ classNames = ['Excavator', 'Gloves', 'Hardhat', 'Ladder', 'Mask', 'NO-Hardhat', 
 myColor = (0, 0, 255)
 
 # Streamlit app
-st.title('Construction Site Safety Video Processing')
+st.title('Zaper Safety - Live Video Safety Monitoring')
 
 # Sidebar for input options
 st.sidebar.title("Input Options")
-input_option = st.sidebar.radio("Choose input source:", ("Upload Video", "Camera Capture", "Preset Videos", "YouTube URL"))
-
+input_option = st.sidebar.radio("Choose input source:", ("Preset Videos", "Upload Video", "Camera Capture", "YouTube URL")) 
 # Function to process frames
 def process_frame(frame):
     # Ensure the frame is writeable
