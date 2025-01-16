@@ -5,6 +5,7 @@ import tempfile
 import streamlit as st
 import numpy as np
 from PIL import Image
+import os
 
 # Load the YOLO model
 model = YOLO("best.pt")
@@ -20,7 +21,7 @@ st.title('Construction Site Safety Video Processing')
 
 # Sidebar for input options
 st.sidebar.title("Input Options")
-input_option = st.sidebar.radio("Choose input source:", ("Upload Video", "Camera Capture"))
+input_option = st.sidebar.radio("Choose input source:", ("Upload Video", "Camera Capture", "Preset Videos"))
 
 # Function to process frames
 def process_frame(frame):
@@ -65,6 +66,16 @@ def list_camera_devices():
         else:
             cap.release()
     return devices
+
+# Function to list preset videos in the 'videos' folder
+def list_preset_videos():
+    video_folder = "videos"  # Folder containing preset videos
+    if not os.path.exists(video_folder):
+        os.makedirs(video_folder)
+        st.warning(f"No videos found in the '{video_folder}' folder. Please add some videos.")
+        return []
+    videos = [f for f in os.listdir(video_folder) if f.endswith('.mp4')]
+    return videos
 
 # Option 1: Upload Video
 if input_option == "Upload Video":
@@ -178,3 +189,74 @@ elif input_option == "Camera Capture":
 
             # Release resources
             cap.release()
+
+# Option 3: Preset Videos
+elif input_option == "Preset Videos":
+    st.sidebar.write("Select a preset video for processing...")
+
+    # List preset videos
+    preset_videos = list_preset_videos()
+    if not preset_videos:
+        st.error("No preset videos found in the 'videos' folder.")
+    else:
+        # Dropdown to select a preset video
+        selected_video = st.sidebar.selectbox("Select Preset Video:", preset_videos)
+        video_path = os.path.join("videos", selected_video)
+
+        # Open the video file
+        cap = cv2.VideoCapture(video_path)
+
+        if not cap.isOpened():
+            st.error(f"Unable to open {selected_video}.")
+        else:
+            # Get video properties
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+
+            # Desired FPS for processing and output
+            desired_fps = 10  # Adjust this value as needed
+            frame_skip_interval = int(fps / desired_fps)
+
+            # Create a temporary output file
+            output_temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+
+            # Create VideoWriter for output with desired FPS
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(output_temp_file.name, fourcc, desired_fps, (width, height))
+
+            # Read frames and process
+            st.write(f'Processing {selected_video}...')
+
+            frame_placeholder = st.empty()
+            frame_count = 0
+
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # Skip frames to reduce FPS
+                frame_count += 1
+                if frame_count % frame_skip_interval != 0:
+                    continue
+
+                # Process the frame
+                processed_frame = process_frame(frame)
+
+                # Write the processed frame
+                out.write(processed_frame)
+
+                # Display the processed frame in Streamlit
+                frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                frame_pil = Image.fromarray(frame_rgb)
+                frame_placeholder.image(frame_pil, use_container_width=True)
+
+            # Release resources
+            cap.release()
+            out.release()
+
+            # Display the processed video
+            st.write('Processed Video:')
+            video_bytes = open(output_temp_file.name, 'rb').read()
+            st.video(video_bytes)
